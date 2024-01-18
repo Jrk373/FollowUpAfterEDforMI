@@ -1,0 +1,644 @@
+---
+title: "FUM Take 1"
+subtitle: "FUM Take 1"
+author: 
+  name: "John Ryan Kivela, MA and Victoria Tewa, LPC"
+  email: "Ryan.Kivela@narbha.org"
+  affiliation: "The Alliance ACO"
+date: today
+date-format: long
+format:
+  html:
+    theme: pulse
+    embed-resources: true
+    toc: true
+    toc-depth: 6
+    code-fold: false
+    footnotes-hover: true
+---
+
+# Introduction
+
+This project is a series of cooperative attempts to identify members encountering the emergency department for mental illness and to facilitate follow up after discharge.This is a CRISP-DM evaluation.
+
+## Purpose
+
+This is to give the Alliance a reliable source of data to determine the eligible population (denominator) for FUM. 
+
+# Overview
+
+probable several words about the state of the hedis and ncqa and contract requirements
+
+# Method
+
+***Data Mining using CRISP-DM***
+
+The CRISP-DM process for data mining was used for this project.
+
+## Business Understanding
+
+### Clear Understanding of business objective
+
+This data will give Alliance Providers better tools and insight into the people in need of follow up, resulting in better follow up and better performance on contract measures. Better performance = more money and repute.
+
+### Success Criteria
+
+This will be successful if the data reliably represents the FUM eligible population, and can be put into production to serve the providers. Also if necessary this could be used as a validation tool, but I don't want to.
+
+### Situation Assessment
+
+This does not exist in the real worlkd yet. Referecne the previous validation projects for a history on all the things. HCA won't try to fix it. 
+
+### Translate to analytical objectives (Determine Project Goals)
+
+
+
+### Clearly understand how action can be taken based on outcomes
+
+
+
+### Identify the Business Problem
+
+The business problem is the same as the other measures. The available data that the Alliance Providers receive via HCA and Cotivity is not reliable. Previous studies have repeatedly found that the data is not reliable. Thus, independent development of data models to determine eligible population is necessary. This may not directly improve VBP scores by direct interaction with Cotivity, but by providing clinical tools, performance will improve, like FUH.
+
+## Data Understanding
+
+### What are the data sources?
+
+| Header1 | Adjudicated Claims |
+|--|--|
+| Text 1|            
+| An excel workbook containing a roster of the members deemed eligible for VBP HEDIS NCQA measures including compliance status. | Records are gathered from the Claims database. |
+|  Text 2 | Claims are extracted for all eligible service codes for the measurement year. |
+
+### Key fieldnames and targets
+
+
+## Data quality
+
+### Is the data we use reliable?
+
+| Header 1 | Adjudicated Claims |
+|--|--|
+| *Text 1* | Claims data is of the highest quality as it is compiled and reviewed extensively by Health Choice for its own business purposes. |
+| The report quality itself is very high as it is compiled by Health Choice Business Intelligence staff. | *Text 2* |
+| The underlying data is what is under investigation. |
+
+## Data Preparation
+
+### r Setup
+
+The following setup, libraries, and packages were loaded.
+
+```{r}
+#| label: R Setup
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+# Load Packages and libraries
+library(tidyverse)
+library(readxl)
+library(odbc)
+
+# Set up ODBC Connections
+PHXSQLP01A <- DBI::dbConnect(odbc::odbc(),"PHXSQLP01A")
+
+QRPTP01 <- DBI::dbConnect(odbc::odbc(),"AllianceData")
+
+# Set up knitting options for markdown file
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set number of digits to display exponential numbers
+options(scipen = 999, 
+        show.signif.stars = TRUE)
+
+```
+
+### Reference Objects
+
+Several reference objects and data frames were created to provide parameters for determining active membership.
+
+```{r Objects_ForAll, ECHO=TRUE, message=FALSE, warning=FALSE}
+# Create common objects for all
+
+# Vector of Alliance Provider Name
+Provider_ShortName <- (c("CBI", "CPIH", "EHS", "LCBHC", "MMHC", "SHG", "SBH", "TGC", "WYGC"))
+
+# Vector of NAZ Counties
+NAZ_Counties <- (c("Apache", "Coconino", "Mohave", "Navajo", "Yavapai"))
+
+# Value Sets
+MyHEDIS2023_AllValueSetsToCodes <- read_xlsx("./documents/M. HEDIS MY 2024 Volume 2 Value Set Directory 2023-08-01.xlsx", sheet = "Value Sets to Codes")
+
+# AHCCCS Billable Codes
+AHCCCSBillableCodes <- read.csv("./documents/Procedure Code lists.csv")
+```
+
+### Enrollments
+
+The next few code sets queries the HCA data bases to gather data from the Global Members Data base.
+
+#### Enrollment Roster
+
+The table GlobalMembers.dbo.Enrollments is the primary source for member enrollment. This table is used as the foundation of the membership enrollment roster and provides us with unique identifiers and all enrollment segments for an individual.
+
+```{sql, connection = QRPTP01, output.var = "GM_Enrollments_AllACC"}
+#| label: AHCCCS Enrollments
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+# This is the source of truth for enrollment start and end dates
+
+declare @AzACC int = narbha.dbo.ufn_GetIntLobIdFromLobName('ArizonaAcc', getdate());
+
+declare @AzRbha int = narbha.dbo.ufn_GetIntLobIdFromLobName('AzRBHA', getdate());
+
+declare @AzSO int = narbha.dbo.ufn_GetIntLobIdFromLobName('AZ State Only', getdate());
+
+declare @AzHCIC int = narbha.dbo.ufn_GetIntLobIdFromLobName('HCIC', getdate());
+
+SELECT * 
+
+FROM GlobalMembers.dbo.Enrollments 
+
+WHERE lobid = @AzACC 
+  AND void = 0 
+  
+ORDER BY PrimaryId , EnrollmentDate DESC
+
+```
+
+```{r}
+#| label: Write AHCCCS Enrollments
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+## Write to CSV
+# write.csv(Enrollments_AllACC, "./data/input/Enrollments_AllACC.csv")
+
+```
+
+#### All AZ Enrollments Data
+
+```{sql, connection = QRPTP01, output.var = "GM_ALLAZ_Enrollments"}
+#| label: GM All AZ Enrollments
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+SELECT * 
+
+FROM GlobalMembers.dbo.DailyMemberShipAllArizonaEnrollments
+
+WHERE void = 0 
+  
+ORDER BY PrimaryId
+```
+
+```{r}
+#| label: Write GM All AZ Enrollments
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+## Write to CSV
+# write.csv(GM_ALLAZ_Enrollments, "./data/input/GM_AllAZ_Enrollments.csv")
+
+```
+
+#### All AZ Addresses Data
+
+```{sql, connection = QRPTP01, output.var = "GM_ALLAZ_Addresses"}
+#| label: GM All AZ Addresses
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+SELECT * 
+
+FROM GlobalMembers.dbo.DailyMemberShipAllArizonaAddresses
+
+WHERE Void = 0 
+  
+```
+
+```{r}
+#| label: Write GM All AZ Addresses
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+## Write to CSV
+# write.csv(GM_ALLAZ_Addresses, "./data/input/GM_AllAZ_Addresses.csv")
+
+```
+
+
+#### Client Demographics
+
+```{sql, connection = QRPTP01, output.var = "GM_Clients_Demographics"}
+#| label: Client Demograhics
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+declare @AzACC int = narbha.dbo.ufn_GetIntLobIdFromLobName('ArizonaAcc', getdate());
+
+declare @AzRbha int = narbha.dbo.ufn_GetIntLobIdFromLobName('AzRBHA', getdate());
+
+declare @AzSO int = narbha.dbo.ufn_GetIntLobIdFromLobName('AZ State Only', getdate());
+
+declare @AzHCIC int = narbha.dbo.ufn_GetIntLobIdFromLobName('HCIC', getdate());
+
+SELECT * 
+
+FROM GlobalMembers.dbo.Clients
+
+WHERE lobid = @AzACC 
+  AND void = 0 
+  
+ORDER BY LastName DESC
+
+```
+
+```{r}
+#| label: Write Client Demographics
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+## Write to CSV
+# write.csv(Clients_Demographics_AllACC, "./data/input/Clients.csv")
+
+```
+
+#### Enrollment Calculation
+
+```{r}
+# For easy load...
+
+AllianceEnrolledMembers <- read.csv("./data/input/AllianceEnrolledMembers.csv")
+
+```
+
+```{r}
+#| label: Enrollment
+#| eval: true
+#| include: true
+#| echo: true
+#| warning: false
+#| error: false
+
+# Identify Alliance Membership
+
+# Merge Enrollment files from HCA global members database. The source data for this is futher outlined inthe Framework document. 
+AllianceEnrolledMembers_Merge <-
+  merge(x = GM_Enrollments_AllACC,
+        y = GM_Clients_Demographics,
+        by = "PrimaryId",
+        all.x = TRUE)
+  
+AllianceEnrolledMembers_Merge <-  
+  AllianceEnrolledMembers_Merge |> 
+  filter(Void.x == FALSE & Void.y == FALSE) |>  # FALSE = The record has not be voided
+  select(
+    PrimaryId,
+    LastName,
+    FirstName,
+    EnrollmentDate,
+    DisenrollmentDate,
+    DOB,
+    DOD,
+    Sex,
+    MaritalStatus,
+    Race,
+    Ethnicity,
+    SpokenLanguage,
+    NativeLanguage
+  )
+
+AllianceEnrolledMembers_Merge <-
+  merge(x = AllianceEnrolledMembers_Merge,
+        y = GM_ALLAZ_Enrollments, # Adds  and AHCCCSID
+        by = "PrimaryId",
+        all.x = TRUE)
+
+AllianceEnrolledMembers_Merge <-
+  AllianceEnrolledMembers_Merge |> 
+  rename("AHCCCSID" = AhcccsId)
+
+AllianceEnrolledMembers_Merge <-
+  merge(x = AllianceEnrolledMembers_Merge,
+        y = ProviderTIN, # Add provider TIN
+        by = "BHHShortName",
+        all.x = TRUE)
+
+# remove hyphen in TIN
+AllianceEnrolledMembers_Merge$BHHProvider_TIN <- gsub("-", "", AllianceEnrolledMembers_Merge$BHHProvider_TIN)
+
+
+AllianceEnrolledMembers_Merge <-
+  AllianceEnrolledMembers_Merge |> 
+  select(
+    PrimaryId,
+    AHCCCSID,
+    LastName,
+    FirstName,
+    BHHShortName,
+    BHHLongName,
+    BHHProvider_TIN,
+    EnrollmentDate.x,
+    DisenrollmentDate.x,
+    DOB,
+    DOD,
+    Sex,
+    MaritalStatus,
+    Race,
+    Ethnicity,
+    SpokenLanguage,
+    NativeLanguage,
+    LineOfBusiness
+  )
+
+AllianceEnrolledMembers_Merge <-
+  merge(x = AllianceEnrolledMembers_Merge,
+        y = GM_ALLAZ_Addresses, # adds address info
+        by = "PrimaryId",
+        all.x = TRUE)
+
+AllianceEnrolledMembers_Merge <- 
+  AllianceEnrolledMembers_Merge |> 
+  select(
+    PrimaryId,
+    AHCCCSID,
+    LastName,
+    FirstName,
+    BHHShortName,
+    BHHLongName,
+    BHHProvider_TIN,
+    EnrollmentDate.x,
+    DisenrollmentDate.x,
+    DOB,
+    DOD,
+    Sex,
+    MaritalStatus,
+    Race,
+    Ethnicity,
+    SpokenLanguage,
+    NativeLanguage,
+    ResCountyName, # Senior finance leaders report this field may not be 100% reliable
+    ResCity, # Same
+    ResEffDate,
+    HomePhone,
+    EmergencyPhone,
+    EmailAddress
+  )
+
+
+
+# Trim extra spaces at end of rescountyname
+AllianceEnrolledMembers_Merge$ResCountyName <-
+  trimws(AllianceEnrolledMembers_Merge$ResCountyName)
+
+# This is a data set containing enrollment information for all ACC members with either enrolled or disenrolled status
+# Next, we make it just Alliance Members
+
+# Filter for The Alliance Providers
+# This is about 382,000 people
+AllianceEnrolledMembers <-
+  AllianceEnrolledMembers_Merge |> 
+  filter(BHHShortName %in% Provider_ShortName)
+
+# Then filter for the 5 northern counties
+# This is about 311,465 people
+AllianceEnrolledMembers <-
+  AllianceEnrolledMembers |> 
+  filter(ResCountyName %in% NAZ_Counties)
+
+# Filter out dead people (no offense intended)
+# This is about 305,673 people
+AllianceEnrolledMembers <-
+  AllianceEnrolledMembers |> 
+  filter(is.na(DOD))
+
+# This table is the record of all living individuals who have had an enrollment with BCBS HCA ACC health plan who are auto-assigned to an Alliance Provider, and who have a residential address in the northern GSA counties.
+
+# Drop the Enrolled Members Merge file because we don't need non-Alliance Members for this
+# rm(AllianceEnrolledMembers_Merge)
+
+## Write to CSV
+# write.csv(AllianceEnrolledMembers, "./data/output/AllianceEnrolledMembers.csv")
+
+```
+
+### Claims
+
+These next few codes sets query the HCA databases for claims data for all types of claims.
+
+#### All claims from VOS table
+
+```{r}
+
+## This is temporary for easy data load during build
+
+Claims_AllHCA <- read.csv("./data/output/Claims_AllHCA.csv")
+
+```
+
+```{sql, connection = QRPTP01, output.var = "Claims_AllHCA"}
+
+-- This is temporarily set to TGC only to reduce overall data load.
+
+SELECT
+  RA,
+  AHCCCSID,
+  svccode,
+  providername,
+  calcnetpd,
+  fedtaxid,
+  iscrisis_UH,
+  isUBCrisis,
+  crisisind,
+  daycrisis,
+  is24crisis,
+  paycontract,
+  paysource,
+  placesvc,
+  providertype,
+  facilitylevel,
+  admtype,
+  admitdate,
+  dischargedate,
+  memberprogram,
+  eligibility,
+  age,
+  age_group,
+  population,
+  primarydiagnosis,
+  dx1,
+  dx2,
+  dx3,
+  dx4,
+  dx5,
+  dx6,
+  dx7,
+  dx8,
+  dx9,
+  dx10,
+  dx11,
+  dx12,
+  memberACCgsa,
+  memberRBHAgsa,
+  memberservicearea,
+  memberzipcode,
+  membercounty,
+  providerACCgsa
+  providerRBHAgsa,
+  renderingproviderservicearea,
+  renderingproviderzipcode,
+  renderingprovidercounty,
+  encounterstatus,
+  encounterstatusdate,
+  pcpname,
+  isopioddx,
+  issabgdx
+  
+FROM
+  claims.dbo.shcavos
+  
+WHERE
+-- Temporarily set to TGC only
+  RA = 'TGC' AND
+  begdate BETWEEN '1/1/2023' AND '12/31/2023'
+
+```
+
+```{r}
+
+write.csv(Claims_AllHCA, "./data/output/Claims_AllHCA.csv")
+
+```
+
+```{r}
+# Check AHCCCS billable codes v. hedis My 2024 codes
+
+```
+
+```{r}
+# Filter MyHEDIS2023_AllValueSetsToCodes for "Inpatient Stay" and store the codes in IPCodes
+IPValueSet <- "Inpatient Stay"
+
+IPCodes <- MyHEDIS2023_AllValueSetsToCodes$Code[MyHEDIS2023_AllValueSetsToCodes$`Value Set Name` == IPValueSet]
+
+# Filter Claims_AllHCA for service codes found in IPCodes
+Claims_IP_AllHCA <- Claims_AllHCA[Claims_AllHCA$svccode %in% IPCodes, ]
+
+columns_to_drop <- c(1, 10, 12, 15, 17, 18, 21, 22, 40, 43, 45)
+
+Claims_IP_AllHCA <- Claims_IP_AllHCA[, -columns_to_drop]
+
+write.csv(Claims_IP_AllHCA, "./data/output/Claims_IP_AllHCA.csv")
+```
+
+To find the eligible population
+
+*To do later*
+1. no people under age 6, as of date of ed visit
+2. Add age stratification later
+3. Add most recent service back into enrollment roster
+
+*Reporting period*
+January 1 to December 1 of measurement year
+
+*Main Denominator*
+Continuous enrollment 
+  member of HCA from date of the ED visit through 30 days (31 days) after the ED visit.
+  allowable gap none
+  anchor date none
+  
+*Event*
+ED visit with *ED* value set WITH *Mental Illness and Intentional Self-harm* value set
+
+*multiple visits*
+if more that one ed visit in a 31 day period of time, include only the first
+
+*followed by inpatient*
+If *inpatient stay* value set on the date of ED or within 30 days (31 total) after ED, then exclude
+
+*Exclusions*
+hospice or hospice intervention
+death during the measurement year
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#| label: Write Claims All HCA
+#| eval: true
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+
+## Write to CSV
+write.csv(Claims_AllHCA, "./data/input/Claims_AllHCA.csv")
+```
+
+## Modeling
+
+### Select Modeling Techniques
+
+### Generate Test Design
+
+### Build Model
+
+### Assess Model
+
+## Evaluation
+
+### Eval 1
+
+### Eval 2
+
+### Eval 3
